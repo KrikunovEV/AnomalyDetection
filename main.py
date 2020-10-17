@@ -34,7 +34,7 @@ bestP, bestR, bestF1, bestM, best = [], [], [], [], 0
 K = np.arange(5, data.shape[0] // 2, 5)
 for k in K:
     print(f'k={k}')
-    anomaly_scores = distances[:, k]
+    k_distances = distances[:, k]
 
     ind = np.argsort(anomaly_scores)
     anomaly_scores = anomaly_scores[ind]
