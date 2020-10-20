@@ -13,46 +13,72 @@ labels = dict['labels'].reshape(-1)
 print(f'data shape: {data.shape}')
 print(f'labels shape: {labels.shape}')
 
-compute_distances = False
-if compute_distances:
-    distances = np.zeros((data.shape[0], 1))
+compute_data = False
+if compute_data:
+    # compute distances
+    distances = np.zeros((data.shape[0], 1), dtype=np.float16)
     for shift in range(1, data.shape[0]):
         shifted_data = np.roll(data, shift=-shift, axis=0)
         d = np.sqrt(np.sum(np.power(data - shifted_data, 2), axis=1))
         distances = np.hstack((distances, d[:, None]))
-        print(f'{shift}')
+        print(f'Computed distance for: {shift}/{data.shape[0]}')
     distances = distances[:, 1:]
-    distances = np.sort(distances, axis=1)
-    with open('distances.pickle', 'wb') as f:
-        pickle.dump(distances, f)
+
+    # define neighbours
+    neighbours = np.zeros((data.shape[0], data.shape[0] - 1), dtype=np.int16)
+    arange = np.arange(data.shape[0], dtype=np.int16)
+    for shift in range(data.shape[0]):
+        neighbours[shift] = np.roll(arange, shift=-shift-1)[:-1]
+        print(f'Defined neighbour for: {shift+1}/{data.shape[0]}')
+
+    # sort data by distance
+    ind = np.argsort(distances, axis=1)
+    distances = np.take_along_axis(distances, ind, axis=1)
+    neighbours = np.take_along_axis(neighbours, ind, axis=1)
+    with open('sat_data.pickle', 'wb') as f:
+        pickle.dump({'distances': distances, 'neighbours': neighbours}, f)
 else:
-    with open('distances.pickle', 'rb') as f:
-        distances = pickle.load(f)
+    with open('sat_data.pickle', 'rb') as f:
+        dictionary = pickle.load(f)
+        distances = dictionary['distances']
+        neighbours = dictionary['neighbours']
 
 AveragePrecision = [0]
 bestP, bestR, bestF1, bestM, best = [], [], [], [], 0
 K = np.arange(5, data.shape[0] // 2, 5)
 for k in K:
-    print(f'k={k}')
-    k_distances = distances[:, k]
+    print(f'k: {k}/{K[len(K) - 1]}')
 
-    ind = np.argsort(anomaly_scores)
-    anomaly_scores = anomaly_scores[ind]
-    l = labels[ind]
+    k_distances = distances[:, k-1]
+    k_neighbours = neighbours[:, :k]
+
+    lrd = []
+    for p in range(len(distances)):
+        dist = distances[p, :k]  # dist from 'p' to its k neighbours
+        k_dist = k_distances[k_neighbours[p]]  # k_dist of its k neighbours
+        reach_dist = np.maximum(dist, k_dist)
+        lrd.append(1. / (np.mean(reach_dist) + 0.00000001))
+    lrd = np.array(lrd)
+
+    LOF = np.array([np.mean(lrd[k_neighbours[p]]) / lrd[p] for p in range(len(distances))])
+
+    ind = np.argsort(LOF)
+    LOF = LOF[ind]
+    targets = labels[ind]
 
     # Compute metrics
     Precision, Recall, F1Score, Matrix = [], [], [], []
-    for t in range(1, len(anomaly_scores) - 1):
-        l_negative = l[:t]
-        l_positive = l[t:]
+    for t in range(1, len(LOF) - 1):
+        negative = targets[:t]
+        positive = targets[t:]
 
-        TP = np.sum(l_positive == 1)
-        FP = len(l_positive) - TP
-        FN = np.sum(l_negative == 1)
+        TP = np.sum(positive == 1)
+        FP = len(positive) - TP
+        FN = np.sum(negative == 1)
         Matrix.append(np.empty((2, 2)))
         Matrix[-1][0, 0] = TP
         Matrix[-1][0, 1] = FP
-        Matrix[-1][1, 0] = len(l_negative) - FN
+        Matrix[-1][1, 0] = len(negative) - FN
         Matrix[-1][1, 1] = FN
 
         Precision.append(TP / (TP + FP))
@@ -93,24 +119,43 @@ plt.title(f'Best are F1={np.around(bestF1[ind_max], 3)},'
           f' AP={np.around(AveragePrecision[best], 3)},'
           f' k={K[best-1]}')
 plt.plot(bestR, bestP)
+plt.xlabel('Recall')
+plt.ylabel('Precision')
+plt.show()
+
+# Visualize AveragePrecision Curve
+plt.title(f'Average Precision Curve')
+plt.plot(K, AveragePrecision[1:])
+plt.xlabel('K')
+plt.ylabel('AP')
 plt.show()
 
 # Print results
+bestM[ind_max] /= bestM[ind_max].sum()
 print(f'\nConfusion Matrix:\n'
       f'         True  False\n'
-      f'Positive {bestM[ind_max][0, 0]} {bestM[ind_max][0, 1]}\n'
-      f'Negative {bestM[ind_max][1, 0]} {bestM[ind_max][1, 1]}\n\n'
-      f'Accuracy by matrix: {(bestM[ind_max][0, 0] + bestM[ind_max][1, 0]) / data.shape[0]}\n\n'
+      f'Positive {np.around(bestM[ind_max][0, 0], 3)} {np.around(bestM[ind_max][0, 1], 3)}\n'
+      f'Negative {np.around(bestM[ind_max][1, 0], 3)} {np.around(bestM[ind_max][1, 1], 3)}\n\n'
+      f'Accuracy by matrix: {bestM[ind_max][0, 0] + bestM[ind_max][1, 0]}\n\n'
       f'Best: F1={np.around(bestF1[ind_max], 3)}, P={np.around(bestP[ind_max], 3)}, R={np.around(bestR[ind_max], 3)}\n'
       f'AveragePrecision={np.around(AveragePrecision[best], 3)}\n'
       f'K={K[best-1]}')
 
 # Visualize data
 k = K[best-1]
-anomaly_scores = distances[:, k]
 threshold = ind_max + 1  # best F1Score index (+1 because threshold start from 1)
+k_distances = distances[:, k-1]
+k_neighbours = neighbours[:, :k]
+lrd = []
+for p in range(len(distances)):
+    dist = distances[p, :k]  # dist from 'p' to its k neighbours
+    k_dist = k_distances[k_neighbours[p]]  # k_dist of its k neighbours
+    reach_dist = np.maximum(dist, k_dist)
+    lrd.append(1. / (np.mean(reach_dist)))
+lrd = np.array(lrd)
+LOF = np.array([np.mean(lrd[k_neighbours[p]]) / lrd[p] for p in range(len(distances))])
 
-ind = np.argsort(anomaly_scores)
+ind = np.argsort(LOF)
 _labels = labels[ind]
 _data = data[ind]
 
