@@ -72,30 +72,29 @@ class LSTMAD:
         self.__train_plot(train_losses, valid_losses, train_gt, train_pred, valid_gt, valid_pred)
 
     def validate(self):
-        evals_normal_1, mu, var = self.__eval_mu_var()
-
-        evals_normal = self.__eval(self.validation2_0, mu, var)
-        evals_anomaly = self.__eval(self.validation_1, mu, var)
-
-        FS, beta, threshold, PR, CM = self.__find_threshold(evals_normal, evals_anomaly)
-
-        self.__validate_plot(evals_normal_1, evals_normal, evals_anomaly, FS, beta, threshold, PR, CM)
-
-        self.threshold = threshold
+        mu, var = self.__eval_mu_var()
         self.mu = mu
         self.var = var
 
+        evals_normal_1 = self.__eval(self.validation1_0)
+        evals_normal = self.__eval(self.validation2_0)
+        evals_anomaly = self.__eval(self.validation_1)
+
+        FS, beta, threshold, P, R, CM = self.__find_threshold(evals_normal, evals_anomaly)
+        self.threshold = threshold
+
+        self.__validate_plot(evals_normal_1, evals_normal, evals_anomaly, FS, beta, P, R, CM)
+
     def test(self):
-        evals_normal = self.__eval(self.test_0, self.mu, self.var)
-        evals_anomaly = self.__eval(self.test_1, self.mu, self.var)
+        evals_normal = self.__eval(self.test_0)
+        evals_anomaly = self.__eval(self.test_1)
 
         CM = self.__find_CM(evals_normal, evals_anomaly)
 
         self.__test_plot(evals_normal, evals_anomaly, CM)
 
     def __eval_mu_var(self):
-        mu, var = [], []
-        evals = []
+        errors = []
         for i_batch, x in enumerate(self.validation1_0):
             y = self.model(x)
             y = y.reshape(-1)[self.mask]
@@ -105,13 +104,12 @@ class LSTMAD:
             x = x[self.cfg.l - 1:].expand(-1, 3)
 
             e = x - y
-            mu.append(e.mean(dim=1))
-            var.append(e.var(dim=1))
-            evals.append(self.eval_fn(e, mu[-1], var[-1]))
+            errors.append(e)
             print(f'eval mu and var, element: {i_batch + 1}/{len(self.validation1_0)}')
-        return torch.stack(evals), torch.stack(mu), torch.stack(var)
+        errors = torch.stack(errors)
+        return errors.mean(), errors.var()
 
-    def __eval(self, dataset, mu, var):
+    def __eval(self, dataset):
         evals = []
         for i_batch, x in enumerate(dataset):
             y = self.model(x)
@@ -122,77 +120,68 @@ class LSTMAD:
             x = x[self.cfg.l - 1:].expand(-1, 3)
 
             e = x - y
-            evals.append(self.eval_fn(e, mu[i_batch], var[i_batch]))
+            evals.append(self.eval_fn(e, self.mu, self.var))
             print(f'compute evals, element: {i_batch + 1}/{len(dataset)}')
         return torch.stack(evals)
 
     def __find_threshold(self, evals_normal, evals_anomaly):
-        evals_normal = evals_normal.min(dim=1)[0]
-        evals_anomaly = evals_anomaly.min(dim=1)[0]
-
-        betas = np.arange(1, 10) / 10.
-        thresholds = np.linspace(0, -50000, 1000)
+        evals = torch.cat((evals_normal.min(dim=1)[0], evals_anomaly.min(dim=1)[0])).detach().numpy()
+        labels = np.concatenate((np.zeros(len(evals_normal)), np.ones(len(evals_anomaly))))
 
         FS = 0
         threshold = 0
-        beta = 0
+        beta = self.cfg.beta
         CM = 0
-        PR = 0
-        for i, b in enumerate(betas):
-            P, R = [], []
-            f_score_changed = False
-            for j, t in enumerate(thresholds):
-                TP, FP, TN, FN = 0, 0, 0, 0
-                for normal, anomaly in zip(evals_normal, evals_anomaly):
-                    # normal - Negative
-                    # anomaly - Positive
-                    if normal >= t:
-                        TN += 1
-                    else:
-                        FP += 1
+        P, R = [], []
 
-                    if anomaly >= t:
-                        FN += 1
-                    else:
-                        TP += 1
+        thresholds = np.sort(evals)[1:-1]
+        for i, t in enumerate(thresholds):
+            l_negative = labels[evals <= t]
+            l_positive = labels[evals > t]
 
-                Precision = TP / (TP + FP) if TP + FP > 0 else 0
-                Recall = TP / (TP + FN) if TP + FN > 0 else 0
-                P.append(Precision)
-                R.append(Recall)
-                if Precision == 0 and Recall == 0:
-                    F_score = 0
-                else:
-                    F_score = (1 + b ** 2) * Precision * Recall / (Precision * b ** 2 + Recall)
+            TP = np.sum(l_positive == 1)
+            FP = len(l_positive) - TP
+            FN = np.sum(l_negative == 1)
 
-                if F_score > FS:
-                    f_score_changed = True
-                    FS = F_score
-                    beta = b
-                    CM = np.array([[TP, FP], [FN, TN]])
-                    threshold = t
+            Precision = TP / (TP + FP) if TP + FP > 0 else 0
+            Recall = TP / (TP + FN) if TP + FN > 0 else 0
+            P.append(Precision)
+            R.append(Recall)
 
-                print(f'beta: {b} ({i + 1}/{len(betas)}), threshold: {t} ({j+1}/{len(thresholds)}), best F score: {FS}')
-            if f_score_changed:
-                PR = [P, R]
+            if Precision == 0 and Recall == 0:
+                Fb_score = 0
+            else:
+                Fb_score = (1 + beta ** 2) * Precision * Recall / (Precision * beta ** 2 + Recall)
 
-        return FS, beta, threshold, PR, CM
+            if Fb_score > FS:
+                CM = np.array([[TP, FP], [FN, len(l_negative) - FN]])
+                threshold = t
+                FS = Fb_score
+
+            print(f'threshold: {np.around(t, 3)} ({i + 1}/{len(thresholds)}), best F score: {np.around(FS, 3)}')
+
+        P = P[::-1]
+        p = P[-1]
+        for i in reversed(range(len(P) - 1)):
+            if P[i] < p:
+                P[i] = p
+            else:
+                p = P[i]
+        P = P[::-1]
+
+        return FS, beta, threshold, P, R, CM
 
     def __find_CM(self, evals_normal, evals_anomaly):
-        evals_normal = evals_normal.min(dim=1)[0]
-        evals_anomaly = evals_anomaly.min(dim=1)[0]
-        TP, FP, TN, FN = 0, 0, 0, 0
-        for normal, anomaly in zip(evals_normal, evals_anomaly):
-            if normal >= self.threshold:
-                TN += 1
-            else:
-                FP += 1
+        evals = torch.cat((evals_normal.min(dim=1)[0], evals_anomaly.min(dim=1)[0])).detach().numpy()
+        labels = np.concatenate((np.zeros(len(evals_normal)), np.ones(len(evals_anomaly))))
 
-            if anomaly >= self.threshold:
-                FN += 1
-            else:
-                TP += 1
-        CM = np.array([[TP, FP], [FN, TN]])
+        l_negative = labels[evals <= self.threshold]
+        l_positive = labels[evals > self.threshold]
+
+        TP = np.sum(l_positive == 1)
+        FP = len(l_positive) - TP
+        FN = np.sum(l_negative == 1)
+        CM = np.array([[TP, FP], [FN, len(l_negative) - FN]])
         return CM
 
     def __train_plot(self, train_losses, valid_losses, train_gt, train_pred, valid_gt, valid_pred):
@@ -230,7 +219,7 @@ class LSTMAD:
         fig.tight_layout()
         plt.savefig('predictions.png')
 
-    def __validate_plot(self, evals_normal_1, evals_normal_2, evals_anomaly_2, FS, beta, threshold, PR, CM):
+    def __validate_plot(self, evals_normal_1, evals_normal_2, evals_anomaly_2, FS, beta, P, R, CM):
         ind = np.random.randint(0, len(evals_normal_1), 2)
         evals_normal_1 = evals_normal_1[ind]
         evals_normal_2 = evals_normal_2[ind]
@@ -245,16 +234,21 @@ class LSTMAD:
             ax[i].plot(evals_normal_1[i].detach().numpy(), label='validation1_0')
             ax[i].plot(evals_normal_2[i].detach().numpy(), label='validation2_0')
             ax[i].plot(evals_anomaly_2[i].detach().numpy(), label='validation_1')
-            ax[i].plot([0, len(evals_normal_1[i].detach().numpy())], [threshold, threshold], '--', label='threshold')
+            ax[i].plot([0, len(evals_normal_1[i].detach().numpy())], [self.threshold, self.threshold], '--',
+                       label='threshold')
             ax[i].legend()
         fig.tight_layout()
         plt.savefig('valid_examples.png')
 
         plt.figure()
-        plt.title(f'PRC, beta: {beta}, threshold: {np.around(threshold, 3)}, F score: {np.around(FS, 3)}')
+        mu = self.mu.detach().numpy().astype(np.float_)
+        var = self.var.detach().numpy().astype(np.float_)
+        threshold = (np.array([self.threshold], dtype=np.float_))[0]
+        plt.title(f'PRC, beta: {beta}, threshold: {np.around(threshold, 3)}, F score: {np.around(FS, 3)}, '
+                  f'mu: {np.around(mu, 3)}, var: {np.around(var, 3)}')
         plt.xlabel('recall')
         plt.ylabel('precision')
-        plt.plot(PR[1], PR[0])
+        plt.plot(R, P)
         plt.tight_layout()
         plt.savefig('PRC.png')
 

@@ -9,6 +9,5 @@ class MNDeval:
 
     def __call__(self, e, mu, var):
         a = self.l * torch.log(var) / 2
-        b = (e - mu.reshape(-1, 1).expand(-1, self.l)).pow(2.).sum(dim=1) / 2 / var
-
+        b = (e - mu).pow(2.).sum(dim=1) / 2 / var
         return -(self.constant + a + b)

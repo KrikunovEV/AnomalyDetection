@@ -17,3 +17,4 @@ cfg.hidden_size = 256
 cfg.length = 140
 cfg.num_layers = 2
 cfg.lr = 0.00001
+cfg.beta = 0.1
