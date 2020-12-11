@@ -1,28 +1,71 @@
+import torch
 import torch.nn as nn
 import torch.optim as optim
+import mlflow
 from config import cfg
 from torch.utils.data.dataloader import DataLoader
-from datasets import ECG5000Dataset
-from models import ECG5000Model
-from MND import MNDeval
-from LSTMAD import LSTMAD
+from datasets import MVTecDataset, DatasetType
+from models import Generator, Discriminator
 
 
-train_0 = DataLoader(dataset=ECG5000Dataset(cfg.train_0_filename), shuffle=True)
-validation1_0 = DataLoader(dataset=ECG5000Dataset(cfg.valid1_0_filename))
-validation2_0 = DataLoader(dataset=ECG5000Dataset(cfg.valid2_0_filename))
-validation_1 = DataLoader(dataset=ECG5000Dataset(cfg.valid_1_filename))
-test_0 = DataLoader(dataset=ECG5000Dataset(cfg.test_0_filename))
-test_1 = DataLoader(dataset=ECG5000Dataset(cfg.test_1_filename))
+train_0 = DataLoader(dataset=MVTecDataset(DatasetType.Train, cfg),
+                     shuffle=True,
+                     batch_size=cfg.batch_size,
+                     drop_last=True)
 
-model = ECG5000Model(input_size=1, hidden_size=cfg.hidden_size, l=cfg.l, num_layers=cfg.num_layers)
-optimizer = optim.Adam(model.parameters(), lr=cfg.lr)
-loss_fn = nn.MSELoss()
-eval_fn = MNDeval(l=cfg.l)
+generator = Generator(cfg.noise_size).cuda()
+discriminator = Discriminator().cuda()
 
-LSTMAD_ = LSTMAD(train_0, validation1_0, validation2_0, validation_1, test_0, test_1,
-                 model, optimizer, loss_fn, eval_fn, cfg)
+gen_optimizer = optim.Adam(generator.parameters(), lr=cfg.lr, betas=(cfg.beta1, 0.999))
+dis_optimizer = optim.Adam(discriminator.parameters(), lr=cfg.lr, betas=(cfg.beta1, 0.999))
 
-LSTMAD_.train()
-LSTMAD_.validate()
-LSTMAD_.test()
+criterion = nn.BCELoss()
+
+real_labels = torch.full((cfg.batch_size,), 1.).cuda()
+fake_labels = torch.full((cfg.batch_size,), 0.).cuda()
+
+step = 0
+
+with mlflow.start_run():
+    for epoch in range(cfg.epochs):
+        for b, real_image in enumerate(train_0):
+
+            real_image = real_image.cuda()
+            z = torch.randn(cfg.batch_size, cfg.noise_size, 1, 1).cuda()
+            fake_image = generator(z)
+
+            real_prob = discriminator(real_image)
+            D_loss = criterion(real_prob, real_labels)
+            D_loss = D_loss + criterion(discriminator(fake_image.detach()), fake_labels)
+            dis_optimizer.zero_grad()
+            D_loss.backward()
+            dis_optimizer.step()
+
+            fake_prob = discriminator(fake_image)
+            G_loss = criterion(fake_prob, real_labels)
+            gen_optimizer.zero_grad()
+            G_loss.backward()
+            gen_optimizer.step()
+
+            mlflow.log_metric('generator loss', G_loss.item(), step=step)
+            mlflow.log_metric('discriminator loss', D_loss.item(), step=step)
+            mlflow.log_metric('common loss', G_loss.item() + D_loss.item(), step=step)
+            mlflow.log_metric('real image probability', real_prob.mean().item(), step=step)
+            mlflow.log_metric('fake image probability', fake_prob.mean().item(), step=step)
+
+            step += 1
+
+            print(f'epoch: {epoch + 1}/{cfg.epochs}, batch: {b + 1}/{len(train_0)}\n'
+                  f'gen loss: {G_loss.item()}, dis loss: {D_loss.item()}, common loss: {G_loss.item()+D_loss.item()}\n'
+                  f'real prob: {real_prob.mean().item()}, fake prob: {fake_prob.mean().item()}\n')
+
+    if epoch % 10 == 0:
+        state = {
+            'generator': generator.state_dict(),
+            'discriminator': discriminator.state_dict(),
+            'gen_optimizer': gen_optimizer.state_dict(),
+            'dis_optimizer': dis_optimizer.state_dict(),
+            'config': cfg,
+            'step': step
+        }
+        torch.save(state, f'models/{epoch}.pt')

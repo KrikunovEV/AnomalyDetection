@@ -4,17 +4,14 @@ import os
 
 cfg = EasyDict()
 
-cfg.data_dir = 'data'
-cfg.train_0_filename = os.path.join(cfg.data_dir, 'train_0')
-cfg.valid1_0_filename = os.path.join(cfg.data_dir, 'validation1_0')
-cfg.valid2_0_filename = os.path.join(cfg.data_dir, 'validation2_0')
-cfg.valid_1_filename = os.path.join(cfg.data_dir, 'validation_1')
-cfg.test_0_filename = os.path.join(cfg.data_dir, 'test_0')
-cfg.test_1_filename = os.path.join(cfg.data_dir, 'test_1')
+cfg.data_dir = os.path.join('data', 'capsule')
+cfg.train_dir = os.path.join(cfg.data_dir, 'train')
+cfg.test_dir = os.path.join(cfg.data_dir, 'test')
+cfg.gt_dir = os.path.join(cfg.data_dir, 'ground_truth')
+cfg.labels = ('good', 'crack', 'faulty_imprint', 'poke', 'scratch', 'squeeze')
 
-cfg.l = 3
-cfg.hidden_size = 256
-cfg.length = 140
-cfg.num_layers = 2
-cfg.lr = 0.00001
-cfg.beta = 0.1
+cfg.epochs = 1000
+cfg.batch_size = 32
+cfg.noise_size = 100
+cfg.lr = 0.0002
+cfg.beta1 = 0.5
