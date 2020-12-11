@@ -34,16 +34,15 @@ with mlflow.start_run():
             z = torch.randn(cfg.batch_size, cfg.noise_size, 1, 1).cuda()
             fake_image = generator(z)
 
-            real_prob = discriminator(real_image)
-            D_loss = criterion(real_prob, real_labels)
-            D_loss = D_loss + criterion(discriminator(fake_image.detach()), fake_labels)
             dis_optimizer.zero_grad()
+            real_prob = discriminator(real_image)
+            D_loss = criterion(real_prob, real_labels) + criterion(discriminator(fake_image.detach()), fake_labels)
             D_loss.backward()
             dis_optimizer.step()
 
+            gen_optimizer.zero_grad()
             fake_prob = discriminator(fake_image)
             G_loss = criterion(fake_prob, real_labels)
-            gen_optimizer.zero_grad()
             G_loss.backward()
             gen_optimizer.step()
 
@@ -59,13 +58,13 @@ with mlflow.start_run():
                   f'gen loss: {G_loss.item()}, dis loss: {D_loss.item()}, common loss: {G_loss.item()+D_loss.item()}\n'
                   f'real prob: {real_prob.mean().item()}, fake prob: {fake_prob.mean().item()}\n')
 
-    if epoch % 10 == 0:
-        state = {
-            'generator': generator.state_dict(),
-            'discriminator': discriminator.state_dict(),
-            'gen_optimizer': gen_optimizer.state_dict(),
-            'dis_optimizer': dis_optimizer.state_dict(),
-            'config': cfg,
-            'step': step
-        }
-        torch.save(state, f'models/{epoch}.pt')
+        if epoch % 10 == 0:
+            state = {
+                'generator': generator.state_dict(),
+                'discriminator': discriminator.state_dict(),
+                'gen_optimizer': gen_optimizer.state_dict(),
+                'dis_optimizer': dis_optimizer.state_dict(),
+                'config': cfg,
+                'step': step
+            }
+            torch.save(state, f'models/{epoch}.pt')

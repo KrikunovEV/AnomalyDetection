@@ -12,13 +12,19 @@ class DatasetType(Enum):
     Test = 2
 
 
+class ToTanhRange:
+    def __call__(self, x):
+        return x * 2. - 1.
+
+
 class MVTecDataset(Dataset):
 
     def __init__(self, type: DatasetType, cfg):
         self.type = type
         self.transform = transforms.Compose([
             transforms.Resize(64),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            ToTanhRange()
         ])
 
         if type == DatasetType.Train:

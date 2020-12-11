@@ -10,7 +10,7 @@ cfg.test_dir = os.path.join(cfg.data_dir, 'test')
 cfg.gt_dir = os.path.join(cfg.data_dir, 'ground_truth')
 cfg.labels = ('good', 'crack', 'faulty_imprint', 'poke', 'scratch', 'squeeze')
 
-cfg.epochs = 1000
+cfg.epochs = 2000
 cfg.batch_size = 32
 cfg.noise_size = 100
 cfg.lr = 0.0002
