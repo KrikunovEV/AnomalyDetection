@@ -15,3 +15,8 @@ cfg.batch_size = 32
 cfg.noise_size = 100
 cfg.lr = 0.0002
 cfg.beta1 = 0.5
+
+cfg.ano = EasyDict()
+cfg.ano.lr = 0.01
+cfg.ano.epochs = 100
+cfg.ano.lambd = 0.5

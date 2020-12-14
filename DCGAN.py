@@ -8,10 +8,10 @@ from datasets import MVTecDataset, DatasetType
 from models import Generator, Discriminator
 
 
-train_0 = DataLoader(dataset=MVTecDataset(DatasetType.Train, cfg),
-                     shuffle=True,
-                     batch_size=cfg.batch_size,
-                     drop_last=True)
+train_dataloader = DataLoader(dataset=MVTecDataset(DatasetType.Train, cfg),
+                              shuffle=True,
+                              batch_size=cfg.batch_size,
+                              drop_last=True)
 
 generator = Generator(cfg.noise_size).cuda()
 discriminator = Discriminator().cuda()
@@ -28,7 +28,7 @@ step = 0
 
 with mlflow.start_run():
     for epoch in range(cfg.epochs):
-        for b, real_image in enumerate(train_0):
+        for b, real_image in enumerate(train_dataloader):
 
             real_image = real_image.cuda()
             z = torch.randn(cfg.batch_size, cfg.noise_size, 1, 1).cuda()
@@ -54,11 +54,11 @@ with mlflow.start_run():
 
             step += 1
 
-            print(f'epoch: {epoch + 1}/{cfg.epochs}, batch: {b + 1}/{len(train_0)}\n'
+            print(f'epoch: {epoch + 1}/{cfg.epochs}, batch: {b + 1}/{len(train_dataloader)}\n'
                   f'gen loss: {G_loss.item()}, dis loss: {D_loss.item()}, common loss: {G_loss.item()+D_loss.item()}\n'
                   f'real prob: {real_prob.mean().item()}, fake prob: {fake_prob.mean().item()}\n')
 
-        if epoch % 10 == 0:
+        if epoch % 100 == 0:
             state = {
                 'generator': generator.state_dict(),
                 'discriminator': discriminator.state_dict(),

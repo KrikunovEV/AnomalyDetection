@@ -1,6 +1,5 @@
-import pickle
-import numpy as np
 import os
+import torch
 from PIL import Image
 from enum import Enum
 from torch.utils.data.dataset import Dataset
@@ -26,6 +25,11 @@ class MVTecDataset(Dataset):
             transforms.ToTensor(),
             ToTanhRange()
         ])
+        self.gt_transform = transforms.Compose([
+            transforms.Resize(64),
+            transforms.ToTensor()
+        ])
+        self.zero_tensor = torch.zeros((1, 64, 64))
 
         if type == DatasetType.Train:
             dir = os.path.join(cfg.train_dir, 'good')
@@ -60,5 +64,5 @@ class MVTecDataset(Dataset):
         elif self.type == DatasetType.Test:
             image = self.transform(Image.open(self.filenames[item]).convert('RGB'))
             label = self.labels[item]
-            gt = Image.open(self.gt[item]).convert('RGB') if label != 'good' else None
+            gt = self.gt_transform(Image.open(self.gt[item]).convert('L')) if label != 'good' else self.zero_tensor
             return image, label, gt
